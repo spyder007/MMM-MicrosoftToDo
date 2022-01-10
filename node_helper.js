@@ -30,58 +30,46 @@ module.exports = NodeHelper.create({
     // copy context to be available inside callbacks
     const self = this;
 
-    var patchUrl = `https://graph.microsoft.com/v1.0/me/lists/${listId}/tasks/${taskId}`;
+    var patchUrl = `https://graph.microsoft.com/v1.0/me/todo/lists/${listId}/tasks/${taskId}`;
+    Log.info(`Updating with ${patchUrl}`);
 
-    const updateBody = {
-      id: taskId,
-      status: "completed"
-    };
+    self.ensureToken(config).then((accessTokenJson) => {
+      var accessToken = accessTokenJson.access_token;
+      self.accessToken = accessToken;
+      const updateBody = {
+        status: "completed"
+      };
 
-    fetch(patchUrl, {
-      method: "PATCH",
-      body: JSON.stringify(updateBody),
-      headers: {
-        "Content-Type": "application/json",
-        Authentication: `Bearer ${self.accessToken}`
-      }
-    })
-      .then(self.checkFetchStatus)
-      .then((response) => response.json())
-      .then(self.checkBodyError)
-      .then((responseJson) => {
-        self.sendSocketNotification(
-          `TASK_COMPLETED_${config.id}`,
-          responseJson
-        );
+      Log.info(`Body = ${JSON.stringify(updateBody)}`);
+
+      fetch(patchUrl, {
+        method: "PATCH",
+        crossDomain: true,
+        body: JSON.stringify(updateBody),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        }
       })
-      .error((error) => self.logError(error));
+        .then(self.checkFetchStatus)
+        .then((response) => response.json())
+        .then(self.checkBodyError)
+        .then((responseJson) => {
+          self.sendSocketNotification(
+            `TASK_COMPLETED_${config.id}`,
+            responseJson
+          );
+        })
+        .catch((error) => self.logError(error));
+    });
   },
 
   getTodos: function (config) {
     // copy context to be available inside callbacks
     const self = this;
 
-    // get access token
-    var tokenUrl = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
-    var refreshToken = config.oauth2RefreshToken;
-    const form = new URLSearchParams();
-    form.append("client_id", config.oauth2ClientId);
-    form.append(
-      "scope",
-      "offline_access user.read " +
-        (config.completeOnClick ? "tasks.readwrite" : "tasks.read")
-    );
-    form.append("refresh_token", refreshToken);
-    form.append("grant_type", "refresh_token");
-    form.append("client_secret", config.oauth2ClientSecret);
-
-    fetch(tokenUrl, {
-      method: "POST",
-      body: form
-    })
-      .then(self.checkFetchStatus)
-      .then((response) => response.json())
-      .then(self.checkBodyError)
+    self
+      .ensureToken(config)
       .then((accessTokenJson) => {
         var accessToken = accessTokenJson.access_token;
         self.accessToken = accessToken;
@@ -212,7 +200,7 @@ module.exports = NodeHelper.create({
                 id: element.id,
                 title: element.title,
                 dueDateTime: element.dueDateTime,
-                listId: config._listId,
+                listId: listId,
                 parsedDate: parsedDate
               };
             });
@@ -255,6 +243,31 @@ module.exports = NodeHelper.create({
       return -1;
     }
     return compareAsc(firstTask.parsedDate, secondTask.parsedDate);
+  },
+
+  ensureToken: function (config) {
+    const self = this;
+    // get access token
+    var tokenUrl = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+    var refreshToken = config.oauth2RefreshToken;
+    const form = new URLSearchParams();
+    form.append("client_id", config.oauth2ClientId);
+    form.append(
+      "scope",
+      "offline_access user.read " +
+        (config.completeOnClick ? "tasks.readwrite" : "tasks.read")
+    );
+    form.append("refresh_token", refreshToken);
+    form.append("grant_type", "refresh_token");
+    form.append("client_secret", config.oauth2ClientSecret);
+
+    return fetch(tokenUrl, {
+      method: "POST",
+      body: form
+    })
+      .then(self.checkFetchStatus)
+      .then((response) => response.json())
+      .then(self.checkBodyError);
   },
 
   checkFetchStatus: function (response) {
